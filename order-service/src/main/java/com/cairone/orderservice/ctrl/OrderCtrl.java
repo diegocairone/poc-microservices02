@@ -1,11 +1,13 @@
 package com.cairone.orderservice.ctrl;
 
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
 import org.springframework.cloud.circuitbreaker.resilience4j.Resilience4JCircuitBreaker;
 import org.springframework.cloud.circuitbreaker.resilience4j.Resilience4JCircuitBreakerFactory;
 import org.springframework.cloud.stream.function.StreamBridge;
+import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,13 +29,16 @@ public class OrderCtrl {
 
     private final OrderRepository orderRepository;
     private final InventoryClient inventoryClient;
-    private final Resilience4JCircuitBreakerFactory circuitBreakerFactory;
     
+    private final Resilience4JCircuitBreakerFactory circuitBreakerFactory;
+    private final ExecutorService traceableExecutorService;
+
     private final StreamBridge streamBridge;
 
     @PostMapping
     public String placeOrder(@RequestBody OrderDto orderDto) {
-        
+    
+        circuitBreakerFactory.configureExecutorService(traceableExecutorService);
         Resilience4JCircuitBreaker circuitBreaker = circuitBreakerFactory.create("inventory");
         
         Supplier<Boolean> supplier = () -> orderDto.getOrderLineItemsList()
@@ -50,7 +55,9 @@ public class OrderCtrl {
             
             orderRepository.save(order);
 
-            streamBridge.send("notificationEventSupplier-out-0", order.getId());
+            streamBridge.send(
+                    "notificationEventSupplier-out-0", 
+                    MessageBuilder.withPayload(order.getId()).build());
             
             return "Order place successfully";
             
